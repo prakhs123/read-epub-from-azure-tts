@@ -62,7 +62,6 @@ source bin/activate
 pip install -r requirements.txt
 python3 read-epub.py --epub-file Alices\ Adventures\ in\ Wonderland.epub --confirm-before-reading 1 --prompt-only-once 0 --item-page 0 --next-index 0
 ```
-This command converts the text of the 2nd page of mybook.epub into speech.
 
 ## Acknowledgements
 This script uses Azure's Text-to-Speech service for converting text into speech.
