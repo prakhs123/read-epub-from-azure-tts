@@ -35,6 +35,12 @@ It is important to note that next-sub-index is an independent entity that determ
 
 Tokens are the smallest unit, and a single ssml string can contain one or more tokens. By properly utilizing next-index and next-sub-index, the project can accurately generate speech output from the HTML page's multiple ssml string and their contained tokens.
 
+To validate you are reading the correct page, I have added two options,
+
+* confirm-before-reading: Optional. 1 if you want to confirm before reading, 0 otherwise
+* prompt-only-once: Optional. 1 if you are ok that you want to read the page, and do not want prompt to come again and again. Default value is 1. If you want prompt again and again, you can set it to 0.
+
+
 ## Example
 ```
 python read-epub.py --epub-file mybook.epub --item-page 2
