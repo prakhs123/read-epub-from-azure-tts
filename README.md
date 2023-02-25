@@ -45,13 +45,6 @@ To validate you are reading the correct page, I have added two options,
 * confirm-before-reading: Optional. 1 if you want to confirm before reading, 0 otherwise
 * prompt-only-once: Optional. 1 if you are ok that you want to read the page, and do not want prompt to come again and again. Default value is 1. If you want prompt again and again, you can set it to 0.
 
-
-## Example
-```
-python read-epub.py --epub-file mybook.epub --item-page 2
-```
-This command converts the text of the 2nd page of mybook.epub into speech.
-
 ## Environment variables
 This script uses two environment variables `SPEECH_KEY` and `SPEECH_REGION` to access the Azure Cognitive Services. Please set these variables to valid Azure subscription key and region respectively.
 
@@ -59,6 +52,17 @@ This script uses two environment variables `SPEECH_KEY` and `SPEECH_REGION` to a
 export SPEECH_KEY=<your_subscription_key>
 export SPEECH_REGION=<your_subscription_region>
 ```
+
+## Getting Started
+```
+export SPEECH_KEY=<your_subscription_key>
+export SPEECH_REGION=<your_subscription_region>
+python3 -m venv .
+source bin/activate
+pip install -r requirements.txt
+python3 read-epub.py --epub-file Alices\ Adventures\ in\ Wonderland.epub --confirm-before-reading 1 --prompt-only-once 0 --item-page 0 --next-index 0
+```
+This command converts the text of the 2nd page of mybook.epub into speech.
 
 ## Acknowledgements
 This script uses Azure's Text-to-Speech service for converting text into speech.
