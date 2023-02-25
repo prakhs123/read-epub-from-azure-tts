@@ -2,6 +2,13 @@
 ## Introduction
 This script is used to convert an EPUB file into speech using Azure's Text-to-Speech (TTS) service. It reads an EPUB file and converts the text of the file into speech using Microsoft Azure Cognitive Services. The script requires SPEECH_KEY and SPEECH_REGION environment variables to be set with a valid Azure subscription key and region respectively.
 
+This project involves converting epub to HTML pages that is divided into multiple ssml string (XML). Each ssml string contains headings or paragraphs, which are referred to as tokens.
+
+## TODOs
+Currently, the project uses `en-US-AriaNeural` voice and `narration-professional` style, which is good for reading books.
+The prosody rate is set to +35%.
+All these constants should be converted to variables and used in argparse.
+
 ## Requirements
 * Python 3.6 or above
 * azure.cognitiveservices.speech
@@ -15,8 +22,17 @@ python read-epub.py --epub-file EPUB_FILE_PATH --item-page ITEM_PAGE
 ```
 
 ## Arguments:
-* --epub-file: Required. Path to the EPUB file to convert to speech.
-* --item-page: Required. Index of the page in the EPUB file to convert to speech.
+* epub-file: Required. Path to the EPUB file to convert to speech.
+* item-page: Required. Index of the page in the EPUB file to convert to speech.
+
+To process the ssml strings and tokens, two variables are used: next-index and next-sub-index.
+
+* next-index: Optional. the index of the ssml string XML from which the speech should start.
+* next-sub-index: Optional. the index of the selected token from which processing should begin.
+
+It is important to note that next-sub-index is an independent entity that determines the starting point for processing tokens, and it does not relate to the processing of tokens inside the selected ssml string.
+
+Tokens are the smallest unit, and a single ssml string can contain one or more tokens. By properly utilizing next-index and next-sub-index, the project can accurately generate speech output from the HTML page's multiple ssml string and their contained tokens.
 
 ## Example
 ```
