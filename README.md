@@ -20,7 +20,7 @@ python read-epub.py --epub-file EPUB_FILE_PATH --item-page ITEM_PAGE
 
 ## Example
 ```
-python read_epub_from_azure_tts.py --epub-file mybook.epub --item-page 2
+python read-epub.py --epub-file mybook.epub --item-page 2
 ```
 This command converts the text of the 2nd page of mybook.epub into speech.
 
