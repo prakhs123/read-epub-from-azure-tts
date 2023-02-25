@@ -5,6 +5,8 @@ This script is used to convert an EPUB file into speech using Azure's Text-to-Sp
 This project involves converting epub to HTML pages that is divided into multiple ssml string (XML). Each ssml string contains headings or paragraphs, which are referred to as tokens.
 The HTML page is split into ssml strings either by headings or by max 9 tokens. I have set max 9 tokens as Azure services can stream 10 minutes of audio in a single request for free-tier plan.
 
+Open your epub in your favourite epub reader, and start reading pages by pages, accompanied by audio :).
+
 ## Prerequisites
 1. Azure subscription - Create one for [free](https://azure.microsoft.com/free/cognitive-services)
 2. [Create a Speech resource](https://portal.azure.com/#create/Microsoft.CognitiveServicesSpeechServices) in the Azure portal.
