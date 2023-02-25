@@ -139,7 +139,7 @@ def main():
         text = extract_emphasis_text(ssml_string)
         key = display_text_that_will_be_converted_to_speech(text, prompt)
         if key == 0:
-            logging.debug("Program requested to be halted")
+            logging.info("Program requested to be halted")
             sys.exit(1)
         # Do not prompt again if prompt_only_once is 1
         if prompt_only_once == 1:
