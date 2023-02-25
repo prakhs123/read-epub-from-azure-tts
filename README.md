@@ -3,7 +3,7 @@
 This script is used to convert an EPUB file into speech using Azure's Text-to-Speech (TTS) service. It reads an EPUB file and converts the text of the file into speech using Microsoft Azure Cognitive Services. The script requires SPEECH_KEY and SPEECH_REGION environment variables to be set with a valid Azure subscription key and region respectively.
 
 This project involves converting epub to HTML pages that is divided into multiple ssml string (XML). Each ssml string contains headings or paragraphs, which are referred to as tokens.
-The HTML page is split either by headings or by max 9 tokens. I have set max 9 tokens as Azure services can stream 10 minutes of audio in a single request for free-tier plan.
+The HTML page is split into ssml strings either by headings or by max 9 tokens. I have set max 9 tokens as Azure services can stream 10 minutes of audio in a single request for free-tier plan.
 
 ## TODOs
 Currently, the project uses `en-US-AriaNeural` voice and `narration-professional` style, which is good for reading books.
