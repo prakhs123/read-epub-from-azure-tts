@@ -31,8 +31,9 @@ python read-epub.py --epub-file EPUB_FILE_PATH --item-page ITEM_PAGE
 ```
 
 ## Arguments:
-* epub-file: Required. Path to the EPUB file to convert to speech.
-* item-page: Required. Index of the page in the EPUB file to convert to speech.
+* html-file: Optinal. Path to HTML file or HTML link for converting to speech.
+* epub-file: Optional. Path to the EPUB file to convert to speech.
+* item-page: Optional. Index of the page in the EPUB file to convert to speech.
 
 To process the ssml strings and tokens, two variables are used: next-index and next-sub-index.
 
