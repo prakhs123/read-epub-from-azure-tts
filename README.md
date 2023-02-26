@@ -16,6 +16,7 @@ Open your epub in your favourite epub reader, and start reading pages by pages, 
 Currently, the project uses `en-US-AriaNeural` voice and `narration-professional` style, which is good for reading books.
 The prosody rate is set to +20%. (Speed)
 All these constants should be converted to variables and used in argparse.
+Remove ads and side contents from HTML pages
 
 ## Requirements
 * Python 3.6 or above
