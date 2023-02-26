@@ -10,7 +10,7 @@ import argparse
 import xml.etree.ElementTree as ET
 
 # configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 SPEECH_KEY = os.environ.get('SPEECH_KEY')
 SPEECH_REGION = os.environ.get('SPEECH_REGION')
@@ -22,11 +22,32 @@ if not SPEECH_REGION:
     raise ValueError("SPEECH_REGION is not set.")
 
 
+def speech_synthesis_get_available_voices():
+    """gets the available voices list."""
+
+    speech_synthesizer = get_speech_synthesizer()
+    print("Enter a locale in BCP-47 format (e.g. en-US) that you want to get the voices of, "
+          "or enter empty to get voices in all locales.")
+    try:
+        text = input()
+    except EOFError:
+        pass
+
+    result = speech_synthesizer.get_voices_async(text).get()
+    # Check result
+    if result.reason == speechsdk.ResultReason.VoicesListRetrieved:
+        print('Voices successfully retrieved, they are:')
+        for voice in result.voices:
+            print(voice.name)
+    elif result.reason == speechsdk.ResultReason.Canceled:
+        print("Speech synthesis canceled; error details: {}".format(result.error_details))
+
+
 def display_text_that_will_be_converted_to_speech(text, prompt):
     logging.info("converting following text to speech")
     logging.info(text)
     if prompt == 1:
-        logging.info('INPUT `1` to start TTS or `0` to stop TTS')
+        logging.info('INPUT `1` to start TTS or `0` to stop TTS or `2` to skip TTS')
         key = int(input())
         return key
     return 1
@@ -65,7 +86,7 @@ def create_ssml_string(text, doc_tag, emphasis_level):
         </{doc_tag}>"""
 
 
-def create_ssml_strings(contents, next_sub_index):
+def create_ssml_strings(contents, next_sub_index, num_tokens):
     def reset_ssml_string():
         nonlocal curr_ssml_string, sub_index, next_sub_index
         curr_ssml_string += footer
@@ -98,13 +119,15 @@ def create_ssml_strings(contents, next_sub_index):
             doc_tag = "p"
             emphasis_level = "none"
 
+        if sub_index > num_tokens:
+            reset_ssml_string()
+        if text == '':
+            reset_ssml_string()
+            continue
         token_string = create_ssml_string(text, doc_tag, emphasis_level)
         curr_ssml_string += token_string
         sub_index += 1
         logging.debug(f"token_string:\n {token_string}\ntoken_index: {next_sub_index + sub_index}")
-
-        if sub_index > 9:
-            reset_ssml_string()
 
     if curr_ssml_string:
         curr_ssml_string += footer
@@ -121,28 +144,36 @@ def main():
     next_sub_index = args.next_sub_index
     prompt = args.confirm_before_reading
     prompt_only_once = args.prompt_only_once
+    num_tokens = args.num_tokens
     try:
-        if args.epub_file:
-            book = epub.read_epub(args.epub_file)
+        if args.epub_or_html_file.endswith('.epub'):
+            book = epub.read_epub(args.epub_or_html_file)
             items = [item for item in book.get_items() if item.get_type() == 9]
             item = items[item_page]
             html = item.get_content()
+        elif args.epub_or_html_file.endswith('.html'):
+            with open(args.epub_or_html_file, 'r') as file:
+                html = file.read()
+        elif args.epub_or_html_file.startswith('http'):
+            session = HTMLSession()
+            r = session.get(args.epub_or_html_file)
+            html = r.text
         else:
-            if args.html_file.startswith('http'):
-                session = HTMLSession()
-                r = session.get(args.html_file)
-                html = r.text
-            else:
-                with open(args.html_file, 'r') as file:
-                    html = file.read()
+            raise Exception('File Not Supported')
     except FileNotFoundError:
-        logging.error("The ebook file is not found.")
+        logging.error("The file is not found.")
         return
     soup = BeautifulSoup(html, 'html.parser')
-    contents = soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p'])
-    ssml_strings = create_ssml_strings(contents[next_sub_index:], next_sub_index)
+    if args.epub_or_html_file.startswith('http'):
+        if soup.article:
+            contents = soup.article.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p'])
+        elif soup.section:
+            contents = soup.section.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p'])
+    else:
+        contents = soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p'])
+    ssml_strings = create_ssml_strings(contents[next_sub_index:], next_sub_index, num_tokens)
     for i, (ssml_string, total_tokens) in enumerate(ssml_strings[next_index:]):
-        logging.debug(f"ssml_string:\n{ssml_string}\nTotal tokens in ssml_string: {total_tokens-1}")
+        logging.debug(f"ssml_string:\n{ssml_string}\nTotal tokens in ssml_string: {total_tokens - 1}")
         logging.info(f"Next Index: {next_index + i + 1}")
         if total_tokens <= 1:
             continue
@@ -151,6 +182,9 @@ def main():
         if key == 0:
             logging.info("Program requested to be halted")
             sys.exit(1)
+        elif key == 2:
+            logging.info("skipping the content")
+            continue
         # Do not prompt again if prompt_only_once is 1
         if prompt_only_once == 1:
             prompt = 0
@@ -168,10 +202,10 @@ def main():
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Text to speech converter')
-    parser.add_argument('--epub-file', type=str, default=None,
-                        help='path to the EPUB file to convert to speech')
-    parser.add_argument('--html-file', type=str, default=None,
-                        help='path to the HTML file to convert to speech')
+    parser.add_argument('--epub-or-html-file', type=str, required=True,
+                        help='path to the EPUB/HTML file to convert to speech')
+    parser.add_argument('--num-tokens', type=int, default=9,
+                        help='number of tokens in one ssml string, default 9')
     parser.add_argument('--item-page', type=int, default=0,
                         help='index of the page in the EPUB file to convert to speech')
     parser.add_argument('--confirm-before-reading', type=int, default=1,
