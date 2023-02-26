@@ -1,6 +1,7 @@
 import os
 import sys
 import azure.cognitiveservices.speech as speechsdk
+from requests_html import HTMLSession
 from ebooklib import epub
 from bs4 import BeautifulSoup
 import xml.sax.saxutils
@@ -115,19 +116,28 @@ def create_ssml_strings(contents, next_sub_index):
 
 def main():
     args = parse_args()
-    try:
-        book = epub.read_epub(args.epub_file)
-    except FileNotFoundError:
-        logging.error("The ebook file is not found.")
-        return
-    items = [item for item in book.get_items() if item.get_type() == 9]
     item_page = args.item_page
     next_index = args.next_index
     next_sub_index = args.next_sub_index
     prompt = args.confirm_before_reading
     prompt_only_once = args.prompt_only_once
-    item = items[item_page]
-    html = item.get_content()
+    try:
+        if args.epub_file:
+            book = epub.read_epub(args.epub_file)
+            items = [item for item in book.get_items() if item.get_type() == 9]
+            item = items[item_page]
+            html = item.get_content()
+        else:
+            if args.html_file.startswith('http'):
+                session = HTMLSession()
+                r = session.get(args.html_file)
+                html = r.text
+            else:
+                with open(args.html_file, 'r') as file:
+                    html = file.read()
+    except FileNotFoundError:
+        logging.error("The ebook file is not found.")
+        return
     soup = BeautifulSoup(html, 'html.parser')
     contents = soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p'])
     ssml_strings = create_ssml_strings(contents[next_sub_index:], next_sub_index)
@@ -158,9 +168,11 @@ def main():
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Text to speech converter')
-    parser.add_argument('--epub-file', type=str, required=True,
+    parser.add_argument('--epub-file', type=str, default=None,
                         help='path to the EPUB file to convert to speech')
-    parser.add_argument('--item-page', type=int, required=True,
+    parser.add_argument('--html-file', type=str, default=None,
+                        help='path to the HTML file to convert to speech')
+    parser.add_argument('--item-page', type=int, default=0,
                         help='index of the page in the EPUB file to convert to speech')
     parser.add_argument('--confirm-before-reading', type=int, default=1,
                         help='Take a prompt before starting tts')
