@@ -22,25 +22,17 @@ if not SPEECH_REGION:
     raise ValueError("SPEECH_REGION is not set.")
 
 
-def speech_synthesis_get_available_voices():
+def speech_synthesis_get_available_voices(text):
     """gets the available voices list."""
-
     speech_synthesizer = get_speech_synthesizer()
-    print("Enter a locale in BCP-47 format (e.g. en-US) that you want to get the voices of, "
-          "or enter empty to get voices in all locales.")
-    try:
-        text = input()
-    except EOFError:
-        pass
-
     result = speech_synthesizer.get_voices_async(text).get()
     # Check result
     if result.reason == speechsdk.ResultReason.VoicesListRetrieved:
-        print('Voices successfully retrieved, they are:')
+        logging.info('Voices successfully retrieved, they are:')
         for voice in result.voices:
-            print(voice.name)
+            logging.info(voice.name)
     elif result.reason == speechsdk.ResultReason.Canceled:
-        print("Speech synthesis canceled; error details: {}".format(result.error_details))
+        logging.error("Speech synthesis canceled; error details: {}".format(result.error_details))
 
 
 def display_text_that_will_be_converted_to_speech(text, prompt):
@@ -139,6 +131,10 @@ def create_ssml_strings(contents, next_sub_index, num_tokens):
 
 def main():
     args = parse_args()
+    locale = args.get_available_voices
+    if locale:
+        speech_synthesis_get_available_voices(locale)
+        return
     item_page = args.item_page
     next_index = args.next_index
     next_sub_index = args.next_sub_index
@@ -202,7 +198,10 @@ def main():
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Text to speech converter')
-    parser.add_argument('--epub-or-html-file', type=str, required=True,
+    parser.add_argument('--get-available-voices', type=str, default=None,
+                        help="Enter a locale in BCP-47 format (e.g. en-US) that you want to get the voices of, "
+          "or enter empty to get voices in all locales.")
+    parser.add_argument('--epub-or-html-file', type=str, required=False,
                         help='path to the EPUB/HTML file to convert to speech')
     parser.add_argument('--num-tokens', type=int, default=9,
                         help='number of tokens in one ssml string, default 9')
