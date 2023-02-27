@@ -29,7 +29,7 @@ Remove ads and side contents from HTML pages
 ## Usage
 
 ```
-python read-epub.py --epub-file EPUB_FILE_PATH --item-page ITEM_PAGE
+python read-epub.py --epub-or-html-file EPUB_FILE_PATH --item-page ITEM_PAGE
 ```
 
 ## Arguments:
@@ -66,7 +66,7 @@ export SPEECH_REGION=<your_subscription_region>
 python3 -m venv .
 source bin/activate
 pip install -r requirements.txt
-python3 read-epub.py --epub-file Alices\ Adventures\ in\ Wonderland.epub --confirm-before-reading 1 --prompt-only-once 0 --item-page 0 --next-index 0
+python3 read-epub.py --epub-or-html-file Alices\ Adventures\ in\ Wonderland.epub --item-page 0 --next-index 0
 ```
 
 ## Acknowledgements
