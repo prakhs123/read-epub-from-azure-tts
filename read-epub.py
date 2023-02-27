@@ -42,8 +42,8 @@ def speech_synthesis_get_available_voices(text):
 
 
 def display_text_that_will_be_converted_to_speech(text):
-    logging.info("converting following text to speech")
-    logging.info(text)
+    logging.debug("converting following text to speech")
+    logging.debug(text)
 
 
 def extract_emphasis_text(xml_string):
@@ -204,8 +204,7 @@ def main():
         if total_tokens < 1:
             continue
         text = extract_emphasis_text(ssml_string)
-        # Display first 24 characters
-        display_text_that_will_be_converted_to_speech(text[:24])
+        display_text_that_will_be_converted_to_speech(text)
         logging.info("Press space to skip the current audio anytime")
         logging.info("Press q to stop program")
         # speech synthesis starts here
