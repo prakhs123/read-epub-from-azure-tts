@@ -35,14 +35,9 @@ def speech_synthesis_get_available_voices(text):
         logging.error("Speech synthesis canceled; error details: {}".format(result.error_details))
 
 
-def display_text_that_will_be_converted_to_speech(text, prompt):
+def display_text_that_will_be_converted_to_speech(text):
     logging.info("converting following text to speech")
     logging.info(text)
-    if prompt == 1:
-        logging.info('INPUT `1` to start TTS or `0` to stop TTS or `2` to skip TTS')
-        key = int(input())
-        return key
-    return 1
 
 
 def extract_emphasis_text(xml_string):
@@ -138,8 +133,6 @@ def main():
     item_page = args.item_page
     next_index = args.next_index
     next_sub_index = args.next_sub_index
-    prompt = args.confirm_before_reading
-    prompt_only_once = args.prompt_only_once
     num_tokens = args.num_tokens
     try:
         if args.epub_or_html_file.endswith('.epub'):
@@ -174,16 +167,7 @@ def main():
         if total_tokens <= 1:
             continue
         text = extract_emphasis_text(ssml_string)
-        key = display_text_that_will_be_converted_to_speech(text, prompt)
-        if key == 0:
-            logging.info("Program requested to be halted")
-            sys.exit(1)
-        elif key == 2:
-            logging.info("skipping the content")
-            continue
-        # Do not prompt again if prompt_only_once is 1
-        if prompt_only_once == 1:
-            prompt = 0
+        display_text_that_will_be_converted_to_speech(text)
         # speech synthesis starts here
         speech_synthesis_result = get_speech_synthesizer().speak_ssml_async(ssml_string).get()
         if speech_synthesis_result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
@@ -207,10 +191,6 @@ def parse_args():
                         help='number of tokens in one ssml string, default 9')
     parser.add_argument('--item-page', type=int, default=0,
                         help='index of the page in the EPUB file to convert to speech')
-    parser.add_argument('--confirm-before-reading', type=int, default=1,
-                        help='Take a prompt before starting tts')
-    parser.add_argument('--prompt-only-once', type=int, default=1,
-                        help='Take prompt only once')
     parser.add_argument('--next-index', type=int, default=0,
                         help='index of ssml string to start speech')
     parser.add_argument('--next-sub-index', type=int, default=0,
