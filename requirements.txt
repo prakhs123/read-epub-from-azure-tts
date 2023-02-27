@@ -2,3 +2,4 @@ EbookLib~=0.18
 beautifulsoup4~=4.11.2
 azure-cognitiveservices-speech~=1.25.0
 requests-html~=0.10.0
+sshkeyboard~=2.3.1

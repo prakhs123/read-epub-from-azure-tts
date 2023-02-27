@@ -23,6 +23,8 @@ Remove ads and side contents from HTML pages
 * azure.cognitiveservices.speech
 * ebooklib
 * beautifulsoup4
+* requests-html
+* sshkeyboard
 
 ## Usage
 

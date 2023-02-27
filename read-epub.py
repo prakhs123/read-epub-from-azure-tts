@@ -1,13 +1,19 @@
+import argparse
+import logging
 import os
 import sys
-import azure.cognitiveservices.speech as speechsdk
-from requests_html import HTMLSession
-from ebooklib import epub
-from bs4 import BeautifulSoup
-import xml.sax.saxutils
-import logging
-import argparse
+import threading
+import time
 import xml.etree.ElementTree as ET
+import xml.sax.saxutils
+from _queue import Empty
+from queue import Queue
+
+import azure.cognitiveservices.speech as speechsdk
+from bs4 import BeautifulSoup
+from ebooklib import epub
+from requests_html import HTMLSession
+from sshkeyboard import listen_keyboard
 
 # configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -22,14 +28,22 @@ if not SPEECH_REGION:
     raise ValueError("SPEECH_REGION is not set.")
 
 
-def display_text_that_will_be_converted_to_speech(text, prompt):
+def speech_synthesis_get_available_voices(text):
+    """gets the available voices list."""
+    speech_synthesizer = get_speech_synthesizer()
+    result = speech_synthesizer.get_voices_async(text).get()
+    # Check result
+    if result.reason == speechsdk.ResultReason.VoicesListRetrieved:
+        logging.info('Voices successfully retrieved, they are:')
+        for voice in result.voices:
+            logging.info(voice.name)
+    elif result.reason == speechsdk.ResultReason.Canceled:
+        logging.error("Speech synthesis canceled; error details: {}".format(result.error_details))
+
+
+def display_text_that_will_be_converted_to_speech(text):
     logging.info("converting following text to speech")
     logging.info(text)
-    if prompt == 1:
-        logging.info('INPUT `1` to start TTS or `0` to stop TTS')
-        key = int(input())
-        return key
-    return 1
 
 
 def extract_emphasis_text(xml_string):
@@ -65,7 +79,7 @@ def create_ssml_string(text, doc_tag, emphasis_level):
         </{doc_tag}>"""
 
 
-def create_ssml_strings(contents, next_sub_index):
+def create_ssml_strings(contents, next_sub_index, num_tokens):
     def reset_ssml_string():
         nonlocal curr_ssml_string, sub_index, next_sub_index
         curr_ssml_string += footer
@@ -98,13 +112,15 @@ def create_ssml_strings(contents, next_sub_index):
             doc_tag = "p"
             emphasis_level = "none"
 
+        if sub_index > num_tokens:
+            reset_ssml_string()
+        if text == '':
+            reset_ssml_string()
+            continue
         token_string = create_ssml_string(text, doc_tag, emphasis_level)
         curr_ssml_string += token_string
         sub_index += 1
         logging.debug(f"token_string:\n {token_string}\ntoken_index: {next_sub_index + sub_index}")
-
-        if sub_index > 9:
-            reset_ssml_string()
 
     if curr_ssml_string:
         curr_ssml_string += footer
@@ -114,48 +130,90 @@ def create_ssml_strings(contents, next_sub_index):
     return ssml_strings
 
 
+def skip_stop(q=None, stop_event=None, halt_event=None, synthesizer=None):
+    while not stop_event.is_set():
+        try:
+            user_input = q.get_nowait()
+            logging.info(f"User Entered `{user_input}`")
+            if user_input == 'space':
+                synthesizer.stop_speaking_async()
+                return
+            elif user_input == 'q':
+                synthesizer.stop_speaking_async()
+                halt_event.set()
+                return
+        except Empty:
+            pass
+    logging.info(f"No User Input found, closing the skip stop thread for this iteration")
+
+
+def get_user_input(q):
+    def press(key):
+        q.put(key)
+
+    listen_keyboard(on_press=press)
+
+
 def main():
     args = parse_args()
+    locale = args.get_available_voices
+    if locale:
+        speech_synthesis_get_available_voices(locale)
+        return
     item_page = args.item_page
     next_index = args.next_index
     next_sub_index = args.next_sub_index
-    prompt = args.confirm_before_reading
-    prompt_only_once = args.prompt_only_once
+    num_tokens = args.num_tokens
     try:
-        if args.epub_file:
-            book = epub.read_epub(args.epub_file)
+        if args.epub_or_html_file.endswith('.epub'):
+            book = epub.read_epub(args.epub_or_html_file)
             items = [item for item in book.get_items() if item.get_type() == 9]
             item = items[item_page]
             html = item.get_content()
+        elif args.epub_or_html_file.endswith('.html'):
+            with open(args.epub_or_html_file, 'r') as file:
+                html = file.read()
+        elif args.epub_or_html_file.startswith('http'):
+            session = HTMLSession()
+            r = session.get(args.epub_or_html_file)
+            html = r.text
         else:
-            if args.html_file.startswith('http'):
-                session = HTMLSession()
-                r = session.get(args.html_file)
-                html = r.text
-            else:
-                with open(args.html_file, 'r') as file:
-                    html = file.read()
+            raise Exception('File Not Supported')
     except FileNotFoundError:
-        logging.error("The ebook file is not found.")
+        logging.error("The file is not found.")
         return
     soup = BeautifulSoup(html, 'html.parser')
-    contents = soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p'])
-    ssml_strings = create_ssml_strings(contents[next_sub_index:], next_sub_index)
+    if args.epub_or_html_file.startswith('http'):
+        if soup.article:
+            contents = soup.article.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p'])
+        elif soup.section:
+            contents = soup.section.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p'])
+    else:
+        contents = soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p'])
+    ssml_strings = create_ssml_strings(contents[next_sub_index:], next_sub_index, num_tokens)
+    synthesizer = get_speech_synthesizer()
+    halt_event = threading.Event()
+    q = Queue()
+    get_user_input_thread = threading.Thread(target=get_user_input, args=(q, ), daemon=True)
+    get_user_input_thread.start()
     for i, (ssml_string, total_tokens) in enumerate(ssml_strings[next_index:]):
-        logging.debug(f"ssml_string:\n{ssml_string}\nTotal tokens in ssml_string: {total_tokens-1}")
+        if halt_event.is_set():
+            break
+        logging.debug(f"ssml_string:\n{ssml_string}\nTotal tokens in ssml_string: {total_tokens - 1}")
         logging.info(f"Next Index: {next_index + i + 1}")
-        if total_tokens <= 1:
+        if total_tokens < 1:
             continue
         text = extract_emphasis_text(ssml_string)
-        key = display_text_that_will_be_converted_to_speech(text, prompt)
-        if key == 0:
-            logging.info("Program requested to be halted")
-            sys.exit(1)
-        # Do not prompt again if prompt_only_once is 1
-        if prompt_only_once == 1:
-            prompt = 0
+        display_text_that_will_be_converted_to_speech(text)
+        logging.info("Press space to skip the current audio anytime")
+        logging.info("Press q to stop program")
         # speech synthesis starts here
-        speech_synthesis_result = get_speech_synthesizer().speak_ssml_async(ssml_string).get()
+        stop_event = threading.Event()
+        skip_stop_thread = threading.Thread(target=skip_stop, args=(q, stop_event, halt_event, synthesizer,))
+        skip_stop_thread.start()
+        speech_synthesis_result = synthesizer.speak_ssml_async(ssml_string).get()
+        stop_event.set()
+        skip_stop_thread.join()
         if speech_synthesis_result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
             logging.debug("Speech synthesized for text [{}]".format(ssml_string))
         elif speech_synthesis_result.reason == speechsdk.ResultReason.Canceled:
@@ -168,16 +226,15 @@ def main():
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Text to speech converter')
-    parser.add_argument('--epub-file', type=str, default=None,
-                        help='path to the EPUB file to convert to speech')
-    parser.add_argument('--html-file', type=str, default=None,
-                        help='path to the HTML file to convert to speech')
+    parser.add_argument('--get-available-voices', type=str, default=None,
+                        help="Enter a locale in BCP-47 format (e.g. en-US) that you want to get the voices of, "
+                             "or enter empty to get voices in all locales.")
+    parser.add_argument('--epub-or-html-file', type=str, required=False,
+                        help='path to the EPUB/HTML file to convert to speech')
+    parser.add_argument('--num-tokens', type=int, default=9,
+                        help='number of tokens in one ssml string, default 9')
     parser.add_argument('--item-page', type=int, default=0,
                         help='index of the page in the EPUB file to convert to speech')
-    parser.add_argument('--confirm-before-reading', type=int, default=1,
-                        help='Take a prompt before starting tts')
-    parser.add_argument('--prompt-only-once', type=int, default=1,
-                        help='Take prompt only once')
     parser.add_argument('--next-index', type=int, default=0,
                         help='index of ssml string to start speech')
     parser.add_argument('--next-sub-index', type=int, default=0,
