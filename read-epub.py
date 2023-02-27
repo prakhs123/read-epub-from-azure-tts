@@ -205,7 +205,7 @@ def main():
             continue
         text = extract_emphasis_text(ssml_string)
         # Display first 24 characters
-        display_text_that_will_be_converted_to_speech(text[24:])
+        display_text_that_will_be_converted_to_speech(text[:24])
         logging.info("Press space to skip the current audio anytime")
         logging.info("Press q to stop program")
         # speech synthesis starts here
