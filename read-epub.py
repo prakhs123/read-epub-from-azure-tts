@@ -1,16 +1,21 @@
+import argparse
+import logging
 import os
 import sys
-import azure.cognitiveservices.speech as speechsdk
-from requests_html import HTMLSession
-from ebooklib import epub
-from bs4 import BeautifulSoup
-import xml.sax.saxutils
-import logging
-import argparse
+import threading
+import time
 import xml.etree.ElementTree as ET
+import xml.sax.saxutils
+from _queue import Empty
+from queue import Queue
+
+import azure.cognitiveservices.speech as speechsdk
+from bs4 import BeautifulSoup
+from ebooklib import epub
+from requests_html import HTMLSession
 
 # configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 SPEECH_KEY = os.environ.get('SPEECH_KEY')
 SPEECH_REGION = os.environ.get('SPEECH_REGION')
@@ -35,14 +40,9 @@ def speech_synthesis_get_available_voices(text):
         logging.error("Speech synthesis canceled; error details: {}".format(result.error_details))
 
 
-def display_text_that_will_be_converted_to_speech(text, prompt):
+def display_text_that_will_be_converted_to_speech(text):
     logging.info("converting following text to speech")
     logging.info(text)
-    if prompt == 1:
-        logging.info('INPUT `1` to start TTS or `0` to stop TTS or `2` to skip TTS')
-        key = int(input())
-        return key
-    return 1
 
 
 def extract_emphasis_text(xml_string):
@@ -129,6 +129,29 @@ def create_ssml_strings(contents, next_sub_index, num_tokens):
     return ssml_strings
 
 
+def skip_stop(q=None, stop_event=None, halt_event=None, synthesizer=None):
+    while not stop_event.is_set():
+        try:
+            user_input = q.get_nowait()
+            logging.info(f"User Entered `{user_input}`")
+            if user_input == ' ':
+                synthesizer.stop_speaking_async()
+                return
+            elif user_input == 'Q':
+                synthesizer.stop_speaking_async()
+                halt_event.set()
+                return
+        except Empty:
+            pass
+    logging.info(f"No User Input found, closing the skip stop thread for this iteration")
+
+
+def get_user_input(q):
+    while True:
+        q.put(sys.stdin.read(1))
+        time.sleep(0.1)
+
+
 def main():
     args = parse_args()
     locale = args.get_available_voices
@@ -138,8 +161,6 @@ def main():
     item_page = args.item_page
     next_index = args.next_index
     next_sub_index = args.next_sub_index
-    prompt = args.confirm_before_reading
-    prompt_only_once = args.prompt_only_once
     num_tokens = args.num_tokens
     try:
         if args.epub_or_html_file.endswith('.epub'):
@@ -168,24 +189,27 @@ def main():
     else:
         contents = soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p'])
     ssml_strings = create_ssml_strings(contents[next_sub_index:], next_sub_index, num_tokens)
+    synthesizer = get_speech_synthesizer()
+    halt_event = threading.Event()
+    q = Queue()
+    get_user_input_thread = threading.Thread(target=get_user_input, args=(q, ), daemon=True)
+    get_user_input_thread.start()
     for i, (ssml_string, total_tokens) in enumerate(ssml_strings[next_index:]):
+        if halt_event.is_set():
+            break
         logging.debug(f"ssml_string:\n{ssml_string}\nTotal tokens in ssml_string: {total_tokens - 1}")
         logging.info(f"Next Index: {next_index + i + 1}")
-        if total_tokens <= 1:
+        if total_tokens < 1:
             continue
         text = extract_emphasis_text(ssml_string)
-        key = display_text_that_will_be_converted_to_speech(text, prompt)
-        if key == 0:
-            logging.info("Program requested to be halted")
-            sys.exit(1)
-        elif key == 2:
-            logging.info("skipping the content")
-            continue
-        # Do not prompt again if prompt_only_once is 1
-        if prompt_only_once == 1:
-            prompt = 0
+        display_text_that_will_be_converted_to_speech(text)
         # speech synthesis starts here
-        speech_synthesis_result = get_speech_synthesizer().speak_ssml_async(ssml_string).get()
+        stop_event = threading.Event()
+        skip_stop_thread = threading.Thread(target=skip_stop, args=(q, stop_event, halt_event, synthesizer,))
+        skip_stop_thread.start()
+        speech_synthesis_result = synthesizer.speak_ssml_async(ssml_string).get()
+        stop_event.set()
+        skip_stop_thread.join()
         if speech_synthesis_result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
             logging.debug("Speech synthesized for text [{}]".format(ssml_string))
         elif speech_synthesis_result.reason == speechsdk.ResultReason.Canceled:
@@ -207,10 +231,6 @@ def parse_args():
                         help='number of tokens in one ssml string, default 9')
     parser.add_argument('--item-page', type=int, default=0,
                         help='index of the page in the EPUB file to convert to speech')
-    parser.add_argument('--confirm-before-reading', type=int, default=1,
-                        help='Take a prompt before starting tts')
-    parser.add_argument('--prompt-only-once', type=int, default=1,
-                        help='Take prompt only once')
     parser.add_argument('--next-index', type=int, default=0,
                         help='index of ssml string to start speech')
     parser.add_argument('--next-sub-index', type=int, default=0,
