@@ -1,20 +1,18 @@
+import argparse
+import logging
 import os
 import sys
 import threading
 import time
+import xml.etree.ElementTree as ET
+import xml.sax.saxutils
 from _queue import Empty
-from concurrent.futures import ThreadPoolExecutor
 from queue import Queue
 
 import azure.cognitiveservices.speech as speechsdk
-from getch import getch
-from requests_html import HTMLSession
-from ebooklib import epub
 from bs4 import BeautifulSoup
-import xml.sax.saxutils
-import logging
-import argparse
-import xml.etree.ElementTree as ET
+from ebooklib import epub
+from requests_html import HTMLSession
 
 # configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
