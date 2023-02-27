@@ -13,9 +13,10 @@ import azure.cognitiveservices.speech as speechsdk
 from bs4 import BeautifulSoup
 from ebooklib import epub
 from requests_html import HTMLSession
+from sshkeyboard import listen_keyboard
 
 # configure logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 SPEECH_KEY = os.environ.get('SPEECH_KEY')
 SPEECH_REGION = os.environ.get('SPEECH_REGION')
@@ -134,10 +135,10 @@ def skip_stop(q=None, stop_event=None, halt_event=None, synthesizer=None):
         try:
             user_input = q.get_nowait()
             logging.info(f"User Entered `{user_input}`")
-            if user_input == ' ':
+            if user_input == 'space':
                 synthesizer.stop_speaking_async()
                 return
-            elif user_input == 'Q':
+            elif user_input == 'q':
                 synthesizer.stop_speaking_async()
                 halt_event.set()
                 return
@@ -147,9 +148,10 @@ def skip_stop(q=None, stop_event=None, halt_event=None, synthesizer=None):
 
 
 def get_user_input(q):
-    while True:
-        q.put(sys.stdin.read(1))
-        time.sleep(0.1)
+    def press(key):
+        q.put(key)
+
+    listen_keyboard(on_press=press)
 
 
 def main():
@@ -203,6 +205,8 @@ def main():
             continue
         text = extract_emphasis_text(ssml_string)
         display_text_that_will_be_converted_to_speech(text)
+        logging.info("Press space to skip the current audio anytime")
+        logging.info("Press q to stop program")
         # speech synthesis starts here
         stop_event = threading.Event()
         skip_stop_thread = threading.Thread(target=skip_stop, args=(q, stop_event, halt_event, synthesizer,))

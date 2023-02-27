@@ -24,6 +24,7 @@ Remove ads and side contents from HTML pages
 * ebooklib
 * beautifulsoup4
 * requests-html
+* sshkeyboard
 
 ## Usage
 
