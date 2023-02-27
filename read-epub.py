@@ -1,6 +1,13 @@
 import os
 import sys
+import threading
+import time
+from _queue import Empty
+from concurrent.futures import ThreadPoolExecutor
+from queue import Queue
+
 import azure.cognitiveservices.speech as speechsdk
+from getch import getch
 from requests_html import HTMLSession
 from ebooklib import epub
 from bs4 import BeautifulSoup
@@ -10,7 +17,7 @@ import argparse
 import xml.etree.ElementTree as ET
 
 # configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 SPEECH_KEY = os.environ.get('SPEECH_KEY')
 SPEECH_REGION = os.environ.get('SPEECH_REGION')
@@ -124,6 +131,29 @@ def create_ssml_strings(contents, next_sub_index, num_tokens):
     return ssml_strings
 
 
+def skip_stop(q=None, stop_event=None, halt_event=None, synthesizer=None):
+    while not stop_event.is_set():
+        try:
+            user_input = q.get_nowait()
+            logging.info(f"User Entered `{user_input}`")
+            if user_input == ' ':
+                synthesizer.stop_speaking_async()
+                return
+            elif user_input == 'Q':
+                synthesizer.stop_speaking_async()
+                halt_event.set()
+                return
+        except Empty:
+            pass
+    logging.info(f"No User Input found, closing the skip stop thread for this iteration")
+
+
+def get_user_input(q):
+    while True:
+        q.put(sys.stdin.read(1))
+        time.sleep(0.1)
+
+
 def main():
     args = parse_args()
     locale = args.get_available_voices
@@ -161,15 +191,27 @@ def main():
     else:
         contents = soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p'])
     ssml_strings = create_ssml_strings(contents[next_sub_index:], next_sub_index, num_tokens)
+    synthesizer = get_speech_synthesizer()
+    halt_event = threading.Event()
+    q = Queue()
+    get_user_input_thread = threading.Thread(target=get_user_input, args=(q, ), daemon=True)
+    get_user_input_thread.start()
     for i, (ssml_string, total_tokens) in enumerate(ssml_strings[next_index:]):
+        if halt_event.is_set():
+            break
         logging.debug(f"ssml_string:\n{ssml_string}\nTotal tokens in ssml_string: {total_tokens - 1}")
         logging.info(f"Next Index: {next_index + i + 1}")
-        if total_tokens <= 1:
+        if total_tokens < 1:
             continue
         text = extract_emphasis_text(ssml_string)
         display_text_that_will_be_converted_to_speech(text)
         # speech synthesis starts here
-        speech_synthesis_result = get_speech_synthesizer().speak_ssml_async(ssml_string).get()
+        stop_event = threading.Event()
+        skip_stop_thread = threading.Thread(target=skip_stop, args=(q, stop_event, halt_event, synthesizer,))
+        skip_stop_thread.start()
+        speech_synthesis_result = synthesizer.speak_ssml_async(ssml_string).get()
+        stop_event.set()
+        skip_stop_thread.join()
         if speech_synthesis_result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
             logging.debug("Speech synthesized for text [{}]".format(ssml_string))
         elif speech_synthesis_result.reason == speechsdk.ResultReason.Canceled:
