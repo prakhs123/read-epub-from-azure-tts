@@ -36,7 +36,7 @@ python read-epub.py --epub-or-html-file EPUB_FILE_PATH --item-page ITEM_PAGE
 * epub-or-html-file: Optional. Path to the EPUB/HTML file to convert to speech.
 * item-page: Optional. Index of the page in the file to convert to speech.
 
-To process the ssml strings and tokens, two variables are used: next-index and next-sub-index.
+To process the ssml strings and tokens, two variables are used: num-tokens and start-index 
 
 * num-tokens: Optional. The number of tokens a SSML string should contain. Default 1.
 * start-index: Optional. the index of the ssml string XML from which the speech should start.
