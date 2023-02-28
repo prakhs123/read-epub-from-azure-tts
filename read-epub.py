@@ -132,7 +132,7 @@ def create_ssml_strings(contents, token_number, num_tokens):
     return ssml_strings
 
 
-def skip_stop(q=None, stop_event=None, halt_event=None, synthesizer=None):
+def skip_stop(q=None, modify_index_queue=None, stop_event=None, halt_event=None, synthesizer=None):
     while not stop_event.is_set():
         try:
             user_input = q.get_nowait()
@@ -144,6 +144,27 @@ def skip_stop(q=None, stop_event=None, halt_event=None, synthesizer=None):
                 synthesizer.stop_speaking_async()
                 halt_event.set()
                 return
+            elif user_input == 'r':
+                synthesizer.stop_speaking_async()
+                modify_index_queue.put('r')
+                return
+            elif user_input == 'b':
+                synthesizer.stop_speaking_async()
+                modify_index_queue.put('b')
+                return
+            elif user_input == 'p':
+                synthesizer.stop_speaking_async()
+                user_input = q.get()
+                logging.info(f"User Entered `{user_input}`")
+                if user_input == 'p':
+                    modify_index_queue.put('r')
+                    return
+                elif user_input == 'q':
+                    halt_event.set()
+                    return
+                else:
+                    logging.error("Invalid Input after Play/Pause")
+                    return
         except Empty:
             pass
     logging.info(f"No User Input found, closing the skip stop thread for this iteration")
@@ -192,14 +213,17 @@ def main():
     else:
         contents = soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p'])
     ssml_strings = create_ssml_strings(contents, 0, num_tokens)
-    for i, (ssml_string, total_tokens, start_sub_token, end_sub_token) in enumerate(ssml_strings):
-        logging.info(f"Index: {i} total_tokens: {total_tokens}, start_sub_token: {start_sub_token}, end_sub_token: {end_sub_token}")
+    for i, (ssml_string, total_tokens, start_token, end_token) in enumerate(ssml_strings):
+        logging.info(f"Index: {i} total_tokens: {total_tokens}, start_token: {start_token}, end_token: {end_token}")
     synthesizer = get_speech_synthesizer()
     halt_event = threading.Event()
     q = Queue()
     get_user_input_thread = threading.Thread(target=get_user_input, args=(q, ), daemon=True)
     get_user_input_thread.start()
-    for i, (ssml_string, total_tokens, start_sub_token, end_sub_token) in enumerate(ssml_strings):
+    modify_index_queue = Queue()
+    i = 0
+    while i < len(ssml_strings):
+        ssml_string, total_tokens, start_token, end_token = ssml_strings[i]
         if i < start_index:
             logging.info(f"Skipping Index: {i}")
             continue
@@ -207,18 +231,24 @@ def main():
             break
         logging.debug(f"ssml_string:\n{ssml_string}\nTotal tokens in ssml_string: {total_tokens - 1}")
         logging.info(f"Current Index: {i}")
-        logging.info(f"Reading from start_sub_token: {start_sub_token}, end_sub_token {end_sub_token}")
+        logging.info(f"Reading from start_token: {start_token}, end_token {end_token}")
         text = extract_emphasis_text(ssml_string)
         display_text_that_will_be_converted_to_speech(text)
-        logging.info("Press space to skip the current audio anytime")
-        logging.info("Press q to stop program")
+        logging.info("Press space to skip the current audio anytime, Press q to stop program, Press b to play previous index, Press r to restart playing, Press p to play/pause")
         # speech synthesis starts here
         stop_event = threading.Event()
-        skip_stop_thread = threading.Thread(target=skip_stop, args=(q, stop_event, halt_event, synthesizer,))
+        skip_stop_thread = threading.Thread(target=skip_stop, args=(q, modify_index_queue, stop_event, halt_event, synthesizer,))
         skip_stop_thread.start()
         speech_synthesis_result = synthesizer.speak_ssml_async(ssml_string).get()
         stop_event.set()
         skip_stop_thread.join()
+        if not modify_index_queue.empty():
+            command = modify_index_queue.get()
+            if command == 'b':
+                i = i-1 if i > 0 else 0
+                continue
+            elif command == 'r':
+                continue
         if speech_synthesis_result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
             logging.debug("Speech synthesized for text [{}]".format(ssml_string))
         elif speech_synthesis_result.reason == speechsdk.ResultReason.Canceled:
@@ -227,6 +257,7 @@ def main():
             if cancellation_details.reason == speechsdk.CancellationReason.Error:
                 if cancellation_details.error_details:
                     logging.error("Error details: {}".format(cancellation_details.error_details))
+        i += 1
 
 
 def parse_args():
