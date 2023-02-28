@@ -171,13 +171,13 @@ def main():
             items = [item for item in book.get_items() if item.get_type() == 9]
             item = items[item_page]
             html = item.get_content()
-        elif args.epub_or_html_file.endswith('.html'):
-            with open(args.epub_or_html_file, 'r') as file:
-                html = file.read()
         elif args.epub_or_html_file.startswith('http'):
             session = HTMLSession()
             r = session.get(args.epub_or_html_file)
             html = r.text
+        elif args.epub_or_html_file.endswith('.html'):
+            with open(args.epub_or_html_file, 'r') as file:
+                html = file.read()
         else:
             raise Exception('File Not Supported')
     except FileNotFoundError:
