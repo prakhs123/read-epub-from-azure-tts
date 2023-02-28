@@ -79,14 +79,16 @@ def create_ssml_string(text, doc_tag, emphasis_level):
         </{doc_tag}>"""
 
 
-def create_ssml_strings(contents, next_sub_index, num_tokens):
+def create_ssml_strings(contents, token_number, num_tokens):
     def reset_ssml_string():
-        nonlocal curr_ssml_string, sub_index, next_sub_index
+        nonlocal curr_ssml_string, current_token_number_inside_index, token_number
+        if curr_ssml_string == header:
+            return
         curr_ssml_string += footer
-        ssml_strings.append((curr_ssml_string, sub_index))
+        ssml_strings.append((curr_ssml_string, current_token_number_inside_index, token_number, token_number + current_token_number_inside_index))
         curr_ssml_string = header
-        next_sub_index += sub_index
-        sub_index = 0
+        token_number += current_token_number_inside_index
+        current_token_number_inside_index = 0
 
     ssml_strings = []
     header = """<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="en-US">
@@ -95,7 +97,7 @@ def create_ssml_strings(contents, next_sub_index, num_tokens):
         </voice>
     </speak>"""
     curr_ssml_string = header
-    sub_index = 0
+    current_token_number_inside_index = 0
 
     for content in contents:
         text = xml.sax.saxutils.escape(content.get_text())
@@ -112,20 +114,20 @@ def create_ssml_strings(contents, next_sub_index, num_tokens):
             doc_tag = "p"
             emphasis_level = "none"
 
-        if sub_index > num_tokens:
+        if current_token_number_inside_index >= num_tokens:
             reset_ssml_string()
         if text == '':
             reset_ssml_string()
             continue
         token_string = create_ssml_string(text, doc_tag, emphasis_level)
         curr_ssml_string += token_string
-        sub_index += 1
-        logging.debug(f"token_string:\n {token_string}\ntoken_index: {next_sub_index + sub_index}")
+        current_token_number_inside_index += 1
+        logging.debug(f"token_string:\n {token_string}\ntoken_index: {token_number + current_token_number_inside_index}")
 
     if curr_ssml_string:
         curr_ssml_string += footer
-        sub_index += 1
-        ssml_strings.append((curr_ssml_string, sub_index))
+        ssml_strings.append((curr_ssml_string, current_token_number_inside_index, token_number, token_number + current_token_number_inside_index))
+        current_token_number_inside_index += 1
 
     return ssml_strings
 
@@ -161,8 +163,7 @@ def main():
         speech_synthesis_get_available_voices(locale)
         return
     item_page = args.item_page
-    next_index = args.next_index
-    next_sub_index = args.next_sub_index
+    start_index = args.start_index
     num_tokens = args.num_tokens
     try:
         if args.epub_or_html_file.endswith('.epub'):
@@ -190,19 +191,23 @@ def main():
             contents = soup.section.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p'])
     else:
         contents = soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p'])
-    ssml_strings = create_ssml_strings(contents[next_sub_index:], next_sub_index, num_tokens)
+    ssml_strings = create_ssml_strings(contents, 0, num_tokens)
+    for i, (ssml_string, total_tokens, start_sub_token, end_sub_token) in enumerate(ssml_strings):
+        logging.info(f"Index: {i} total_tokens: {total_tokens}, start_sub_token: {start_sub_token}, end_sub_token: {end_sub_token}")
     synthesizer = get_speech_synthesizer()
     halt_event = threading.Event()
     q = Queue()
     get_user_input_thread = threading.Thread(target=get_user_input, args=(q, ), daemon=True)
     get_user_input_thread.start()
-    for i, (ssml_string, total_tokens) in enumerate(ssml_strings[next_index:]):
+    for i, (ssml_string, total_tokens, start_sub_token, end_sub_token) in enumerate(ssml_strings):
+        if i < start_index:
+            logging.info(f"Skipping Index: {i}")
+            continue
         if halt_event.is_set():
             break
         logging.debug(f"ssml_string:\n{ssml_string}\nTotal tokens in ssml_string: {total_tokens - 1}")
-        logging.info(f"Next Index: {next_index + i + 1}")
-        if total_tokens < 1:
-            continue
+        logging.info(f"Current Index: {i}")
+        logging.info(f"Reading from start_sub_token: {start_sub_token}, end_sub_token {end_sub_token}")
         text = extract_emphasis_text(ssml_string)
         display_text_that_will_be_converted_to_speech(text)
         logging.info("Press space to skip the current audio anytime")
@@ -235,10 +240,8 @@ def parse_args():
                         help='number of tokens in one ssml string, default 1')
     parser.add_argument('--item-page', type=int, default=0,
                         help='index of the page in the EPUB file to convert to speech')
-    parser.add_argument('--next-index', type=int, default=0,
+    parser.add_argument('--start-index', type=int, default=0,
                         help='index of ssml string to start speech')
-    parser.add_argument('--next-sub-index', type=int, default=0,
-                        help='index of ssml token to start processing')
     return parser.parse_args()
 
 
