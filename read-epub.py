@@ -226,6 +226,7 @@ def main():
         ssml_string, total_tokens, start_token, end_token = ssml_strings[i]
         if i < start_index:
             logging.info(f"Skipping Index: {i}")
+            i += 1
             continue
         if halt_event.is_set():
             break
