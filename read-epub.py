@@ -1,19 +1,14 @@
 import argparse
+import asyncio
 import logging
 import os
-import sys
-import threading
-import time
 import xml.etree.ElementTree as ET
 import xml.sax.saxutils
-from _queue import Empty
-from queue import Queue
 
 import azure.cognitiveservices.speech as speechsdk
 from bs4 import BeautifulSoup
 from ebooklib import epub
 from requests_html import HTMLSession
-from sshkeyboard import listen_keyboard
 
 # configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -26,6 +21,21 @@ if not SPEECH_KEY:
 
 if not SPEECH_REGION:
     raise ValueError("SPEECH_REGION is not set.")
+
+import contextlib
+import sys
+import termios
+
+@contextlib.contextmanager
+def raw_mode(file):
+    old_attrs = termios.tcgetattr(file.fileno())
+    new_attrs = old_attrs[:]
+    new_attrs[3] = new_attrs[3] & ~(termios.ECHO | termios.ICANON)
+    try:
+        termios.tcsetattr(file.fileno(), termios.TCSADRAIN, new_attrs)
+        yield
+    finally:
+        termios.tcsetattr(file.fileno(), termios.TCSADRAIN, old_attrs)
 
 
 def speech_synthesis_get_available_voices(text):
@@ -85,7 +95,8 @@ def create_ssml_strings(contents, token_number, num_tokens):
         if curr_ssml_string == header:
             return
         curr_ssml_string += footer
-        ssml_strings.append((curr_ssml_string, current_token_number_inside_index, token_number, token_number + current_token_number_inside_index))
+        ssml_strings.append((curr_ssml_string, current_token_number_inside_index, token_number,
+                             token_number + current_token_number_inside_index))
         curr_ssml_string = header
         token_number += current_token_number_inside_index
         current_token_number_inside_index = 0
@@ -122,62 +133,88 @@ def create_ssml_strings(contents, token_number, num_tokens):
         token_string = create_ssml_string(text, doc_tag, emphasis_level)
         curr_ssml_string += token_string
         current_token_number_inside_index += 1
-        logging.debug(f"token_string:\n {token_string}\ntoken_index: {token_number + current_token_number_inside_index}")
+        logging.debug(
+            f"token_string:\n {token_string}\ntoken_index: {token_number + current_token_number_inside_index}")
 
     if curr_ssml_string:
         curr_ssml_string += footer
-        ssml_strings.append((curr_ssml_string, current_token_number_inside_index, token_number, token_number + current_token_number_inside_index))
+        ssml_strings.append((curr_ssml_string, current_token_number_inside_index, token_number,
+                             token_number + current_token_number_inside_index))
         current_token_number_inside_index += 1
 
     return ssml_strings
 
 
-def skip_stop(q=None, modify_index_queue=None, stop_event=None, halt_event=None, synthesizer=None):
-    while not stop_event.is_set():
+async def user_input_fn(i, reader, stop_event=None, halt_event=None, synthesizer=None):
+    while True:
         try:
-            user_input = q.get_nowait()
+            user_input = await asyncio.wait_for(reader.read(1), timeout=0.1)
+            user_input = user_input.decode()
             logging.info(f"User Entered `{user_input}`")
-            if user_input == 'space':
+            if user_input == ' ':
                 synthesizer.stop_speaking_async()
-                return
+                return i+1
             elif user_input == 'q':
                 synthesizer.stop_speaking_async()
                 halt_event.set()
-                return
+                return i
             elif user_input == 'r':
                 synthesizer.stop_speaking_async()
-                modify_index_queue.put('r')
-                return
+                return i
             elif user_input == 'b':
                 synthesizer.stop_speaking_async()
-                modify_index_queue.put('b')
-                return
+                return i-1
             elif user_input == 'p':
                 synthesizer.stop_speaking_async()
-                user_input = q.get()
+                user_input = await reader.read(1)
                 logging.info(f"User Entered `{user_input}`")
                 if user_input == 'p':
-                    modify_index_queue.put('r')
-                    return
+                    return i
                 elif user_input == 'q':
                     halt_event.set()
-                    return
+                    return i
                 else:
                     logging.error("Invalid Input after Play/Pause")
-                    return
-        except Empty:
-            pass
-    logging.info(f"No User Input found, closing the skip stop thread for this iteration")
+                    halt_event.set()
+                    return i
+        except asyncio.TimeoutError:
+            if stop_event.is_set():
+                return i+1
 
 
-def get_user_input(q):
-    def press(key):
-        q.put(key)
+async def speak(synthesizer, ssml_string, stop_event):
+    syn_completed = False
 
-    listen_keyboard(on_press=press)
+    def synthesis_completed(evt):
+        nonlocal syn_completed
+        logging.debug(f"Synthesis Completed")
+        speech_synthesis_result = evt.result
+        if speech_synthesis_result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+            logging.debug("Speech synthesized for text [{}]".format(ssml_string))
+        syn_completed = True
+
+    def synthesis_cancelled(evt):
+        nonlocal syn_completed
+        logging.error(f"Synthesis Cancelled")
+        speech_synthesis_result = evt.result
+        if speech_synthesis_result.reason == speechsdk.ResultReason.Canceled:
+            cancellation_details = speech_synthesis_result.cancellation_details
+            logging.error("Speech synthesis canceled: {}".format(cancellation_details.reason))
+            if cancellation_details.reason == speechsdk.CancellationReason.Error:
+                if cancellation_details.error_details:
+                    logging.error("Error details: {}".format(cancellation_details.error_details))
+        syn_completed = True
+
+    synthesizer.synthesis_completed.connect(synthesis_completed)
+    synthesizer.synthesis_canceled.connect(synthesis_cancelled)
+    await asyncio.to_thread(synthesizer.start_speaking_ssml_async, ssml_string)
+    while syn_completed is False:
+        await asyncio.sleep(0.1)
+    synthesizer.synthesis_completed.disconnect_all()
+    stop_event.set()
 
 
-def main():
+async def main():
     args = parse_args()
     locale = args.get_available_voices
     if locale:
@@ -216,49 +253,37 @@ def main():
     for i, (ssml_string, total_tokens, start_token, end_token) in enumerate(ssml_strings):
         logging.info(f"Index: {i} total_tokens: {total_tokens}, start_token: {start_token}, end_token: {end_token}")
     synthesizer = get_speech_synthesizer()
-    halt_event = threading.Event()
-    q = Queue()
-    get_user_input_thread = threading.Thread(target=get_user_input, args=(q, ), daemon=True)
-    get_user_input_thread.start()
-    modify_index_queue = Queue()
+    halt_event = asyncio.Event()
     i = 0
-    while i < len(ssml_strings):
-        ssml_string, total_tokens, start_token, end_token = ssml_strings[i]
-        if i < start_index:
-            logging.info(f"Skipping Index: {i}")
-            i += 1
-            continue
-        if halt_event.is_set():
-            break
-        logging.debug(f"ssml_string:\n{ssml_string}\nTotal tokens in ssml_string: {total_tokens - 1}")
-        logging.info(f"Current Index: {i}")
-        logging.info(f"Reading from start_token: {start_token}, end_token {end_token}")
-        text = extract_emphasis_text(ssml_string)
-        display_text_that_will_be_converted_to_speech(text)
-        logging.info("Press space to skip the current audio anytime, Press q to stop program, Press b to play previous index, Press r to restart playing, Press p to play/pause")
-        # speech synthesis starts here
-        stop_event = threading.Event()
-        skip_stop_thread = threading.Thread(target=skip_stop, args=(q, modify_index_queue, stop_event, halt_event, synthesizer,))
-        skip_stop_thread.start()
-        speech_synthesis_result = synthesizer.speak_ssml_async(ssml_string).get()
-        stop_event.set()
-        skip_stop_thread.join()
-        if not modify_index_queue.empty():
-            command = modify_index_queue.get()
-            if command == 'b':
-                i = i-1 if i > 0 else 0
+    with raw_mode(sys.stdin):
+        reader = asyncio.StreamReader()
+        loop = asyncio.get_event_loop()
+        await loop.connect_read_pipe(lambda: asyncio.StreamReaderProtocol(reader), sys.stdin)
+        while i < len(ssml_strings):
+            ssml_string, total_tokens, start_token, end_token = ssml_strings[i]
+            if i < start_index:
+                logging.info(f"Skipping Index: {i}")
+                i += 1
                 continue
-            elif command == 'r':
-                continue
-        if speech_synthesis_result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-            logging.debug("Speech synthesized for text [{}]".format(ssml_string))
-        elif speech_synthesis_result.reason == speechsdk.ResultReason.Canceled:
-            cancellation_details = speech_synthesis_result.cancellation_details
-            logging.error("Speech synthesis canceled: {}".format(cancellation_details.reason))
-            if cancellation_details.reason == speechsdk.CancellationReason.Error:
-                if cancellation_details.error_details:
-                    logging.error("Error details: {}".format(cancellation_details.error_details))
-        i += 1
+            if halt_event.is_set():
+                break
+            logging.debug(f"ssml_string:\n{ssml_string}\nTotal tokens in ssml_string: {total_tokens - 1}")
+            logging.info(f"Current Index: {i}")
+            logging.info(f"Reading from start_token: {start_token}, end_token {end_token}")
+            text = extract_emphasis_text(ssml_string)
+            display_text_that_will_be_converted_to_speech(text)
+            logging.info(
+                "Press space to skip the current audio anytime, Press q to stop program, Press b to play previous index, Press r to restart playing, Press p to play/pause")
+            # speech synthesis starts here
+            stop_event = asyncio.Event()
+            speak_coroutine = asyncio.create_task(speak(synthesizer, ssml_string, stop_event))
+            user_input_coroutine = asyncio.create_task(user_input_fn(i, reader, stop_event, halt_event, synthesizer))
+            _, i_to_set = await asyncio.gather(
+                speak_coroutine,
+                user_input_coroutine,
+            )
+            logging.info(f'Index {i} completed')
+            i = i_to_set
 
 
 def parse_args():
@@ -278,4 +303,4 @@ def parse_args():
 
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(main())
