@@ -167,6 +167,7 @@ async def user_input_fn(i, reader, stop_event=None, halt_event=None, synthesizer
             elif user_input == 'p':
                 synthesizer.stop_speaking_async()
                 user_input = await reader.read(1)
+                user_input = user_input.decode()
                 logging.info(f"User Entered `{user_input}`")
                 if user_input == 'p':
                     return i
