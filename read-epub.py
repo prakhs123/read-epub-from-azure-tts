@@ -171,8 +171,8 @@ async def user_input_fn(reader, halt_event=None, unpause_event=None, synthesizer
         elif not play and user_input == 'p':
             unpause_event.set()
         elif not play:
+            unpause_event.set()
             halt_event.set()
-
 
 
 async def speak(synthesizer, ssml_string):
