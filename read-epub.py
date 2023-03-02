@@ -170,6 +170,7 @@ async def user_input_fn(reader, halt_event=None, unpause_event=None, synthesizer
             await queue.put('p')
         elif not play and user_input == 'p':
             unpause_event.set()
+            play = True
         elif not play:
             unpause_event.set()
             halt_event.set()
@@ -281,6 +282,8 @@ async def main():
                     continue
                 elif user_input_if_any == 'p':
                     await unpause_event.wait()
+                    unpause_event.clear()
+                    continue
             except QueueEmpty:
                 pass
             i += 1
