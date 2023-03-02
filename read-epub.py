@@ -1,9 +1,11 @@
 import argparse
 import asyncio
+import functools
 import logging
 import os
 import xml.etree.ElementTree as ET
 import xml.sax.saxutils
+from asyncio import QueueEmpty
 
 import azure.cognitiveservices.speech as speechsdk
 from bs4 import BeautifulSoup
@@ -11,7 +13,7 @@ from ebooklib import epub
 from requests_html import HTMLSession
 
 # configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 SPEECH_KEY = os.environ.get('SPEECH_KEY')
 SPEECH_REGION = os.environ.get('SPEECH_REGION')
@@ -145,57 +147,43 @@ def create_ssml_strings(contents, token_number, num_tokens):
     return ssml_strings
 
 
-async def user_input_fn(i, reader, stop_event=None, halt_event=None, synthesizer=None):
-    while True:
-        try:
-            user_input = await asyncio.wait_for(reader.read(1), timeout=0.1)
-            user_input = user_input.decode()
-            logging.info(f"User Entered `{user_input}`")
-            if user_input == ' ':
-                synthesizer.stop_speaking_async()
-                return i+1
-            elif user_input == 'q':
-                synthesizer.stop_speaking_async()
-                halt_event.set()
-                return i
-            elif user_input == 'r':
-                synthesizer.stop_speaking_async()
-                return i
-            elif user_input == 'b':
-                synthesizer.stop_speaking_async()
-                return i-1
-            elif user_input == 'p':
-                synthesizer.stop_speaking_async()
-                user_input = await reader.read(1)
-                user_input = user_input.decode()
-                logging.info(f"User Entered `{user_input}`")
-                if user_input == 'p':
-                    return i
-                elif user_input == 'q':
-                    halt_event.set()
-                    return i
-                else:
-                    logging.error("Invalid Input after Play/Pause")
-                    halt_event.set()
-                    return i
-        except asyncio.TimeoutError:
-            if stop_event.is_set():
-                return i+1
+async def user_input_fn(reader, halt_event=None, unpause_event=None, synthesizer=None, queue=None):
+    play = True
+    while not halt_event.is_set():
+        user_input = await reader.read(1)
+        user_input = user_input.decode()
+        logging.info(f"User Entered `{user_input}`")
+        if play and user_input == ' ':
+            synthesizer.stop_speaking_async()
+        elif play and user_input == 'q':
+            synthesizer.stop_speaking_async()
+            halt_event.set()
+        elif play and user_input == 'b':
+            synthesizer.stop_speaking_async()
+            await queue.put('b')
+        elif play and user_input == 'r':
+            synthesizer.stop_speaking_async()
+            await queue.put('r')
+        elif play and user_input == 'p':
+            synthesizer.stop_speaking_async()
+            play = False
+            await queue.put('p')
+        elif not play and user_input == 'p':
+            unpause_event.set()
+        elif not play:
+            halt_event.set()
 
 
-async def speak(synthesizer, ssml_string, stop_event):
-    syn_completed = False
 
-    def synthesis_completed(evt):
-        nonlocal syn_completed
+async def speak(synthesizer, ssml_string):
+    def synthesis_completed(event, loop, evt):
         logging.debug(f"Synthesis Completed")
         speech_synthesis_result = evt.result
         if speech_synthesis_result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
             logging.debug("Speech synthesized for text [{}]".format(ssml_string))
-        syn_completed = True
+        loop.call_soon_threadsafe(event.set)
 
-    def synthesis_cancelled(evt):
-        nonlocal syn_completed
+    def synthesis_cancelled(event, loop, evt):
         logging.error(f"Synthesis Cancelled")
         speech_synthesis_result = evt.result
         if speech_synthesis_result.reason == speechsdk.ResultReason.Canceled:
@@ -204,15 +192,15 @@ async def speak(synthesizer, ssml_string, stop_event):
             if cancellation_details.reason == speechsdk.CancellationReason.Error:
                 if cancellation_details.error_details:
                     logging.error("Error details: {}".format(cancellation_details.error_details))
-        syn_completed = True
-
-    synthesizer.synthesis_completed.connect(synthesis_completed)
-    synthesizer.synthesis_canceled.connect(synthesis_cancelled)
+        loop.call_soon_threadsafe(event.set)
+    completion_event = asyncio.Event()
+    synthesis_completed_partial = functools.partial(synthesis_completed, completion_event, asyncio.get_running_loop())
+    synthesis_cancelled_partial = functools.partial(synthesis_cancelled, completion_event, asyncio.get_running_loop())
+    synthesizer.synthesis_completed.connect(synthesis_completed_partial)
+    synthesizer.synthesis_canceled.connect(synthesis_cancelled_partial)
     await asyncio.to_thread(synthesizer.start_speaking_ssml_async, ssml_string)
-    while syn_completed is False:
-        await asyncio.sleep(0.1)
+    await completion_event.wait()
     synthesizer.synthesis_completed.disconnect_all()
-    stop_event.set()
 
 
 async def main():
@@ -255,11 +243,14 @@ async def main():
         logging.info(f"Index: {i} total_tokens: {total_tokens}, start_token: {start_token}, end_token: {end_token}")
     synthesizer = get_speech_synthesizer()
     halt_event = asyncio.Event()
+    unpause_event = asyncio.Event()
+    modify_index_queue = asyncio.Queue()
     i = 0
     with raw_mode(sys.stdin):
         reader = asyncio.StreamReader()
         loop = asyncio.get_event_loop()
         await loop.connect_read_pipe(lambda: asyncio.StreamReaderProtocol(reader), sys.stdin)
+        user_input_coroutine = asyncio.create_task(user_input_fn(reader, halt_event, unpause_event, synthesizer, modify_index_queue))
         while i < len(ssml_strings):
             ssml_string, total_tokens, start_token, end_token = ssml_strings[i]
             if i < start_index:
@@ -276,15 +267,23 @@ async def main():
             logging.info(
                 "Press space to skip the current audio anytime, Press q to stop program, Press b to play previous index, Press r to restart playing, Press p to play/pause")
             # speech synthesis starts here
-            stop_event = asyncio.Event()
-            speak_coroutine = asyncio.create_task(speak(synthesizer, ssml_string, stop_event))
-            user_input_coroutine = asyncio.create_task(user_input_fn(i, reader, stop_event, halt_event, synthesizer))
-            _, i_to_set = await asyncio.gather(
-                speak_coroutine,
-                user_input_coroutine,
-            )
+            speak_coroutine = asyncio.create_task(speak(synthesizer, ssml_string))
+            await speak_coroutine
             logging.info(f'Index {i} completed')
-            i = i_to_set
+            try:
+                user_input_if_any = modify_index_queue.get_nowait()
+                if user_input_if_any == 'b':
+                    i -= 1
+                    continue
+                elif user_input_if_any == 'r':
+                    continue
+                elif user_input_if_any == 'p':
+                    await unpause_event.wait()
+            except QueueEmpty:
+                pass
+            i += 1
+
+    user_input_coroutine.cancel()
 
 
 def parse_args():
