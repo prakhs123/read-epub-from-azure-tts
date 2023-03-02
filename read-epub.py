@@ -1,8 +1,11 @@
 import argparse
 import asyncio
+import contextlib
 import functools
 import logging
 import os
+import sys
+import termios
 import xml.etree.ElementTree as ET
 import xml.sax.saxutils
 from asyncio import QueueEmpty
@@ -13,7 +16,7 @@ from ebooklib import epub
 from requests_html import HTMLSession
 
 # configure logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 SPEECH_KEY = os.environ.get('SPEECH_KEY')
 SPEECH_REGION = os.environ.get('SPEECH_REGION')
@@ -24,9 +27,6 @@ if not SPEECH_KEY:
 if not SPEECH_REGION:
     raise ValueError("SPEECH_REGION is not set.")
 
-import contextlib
-import sys
-import termios
 
 @contextlib.contextmanager
 def raw_mode(file):
@@ -193,6 +193,7 @@ async def speak(synthesizer, ssml_string):
                 if cancellation_details.error_details:
                     logging.error("Error details: {}".format(cancellation_details.error_details))
         loop.call_soon_threadsafe(event.set)
+
     completion_event = asyncio.Event()
     synthesis_completed_partial = functools.partial(synthesis_completed, completion_event, asyncio.get_running_loop())
     synthesis_cancelled_partial = functools.partial(synthesis_cancelled, completion_event, asyncio.get_running_loop())
@@ -250,7 +251,8 @@ async def main():
         reader = asyncio.StreamReader()
         loop = asyncio.get_event_loop()
         await loop.connect_read_pipe(lambda: asyncio.StreamReaderProtocol(reader), sys.stdin)
-        user_input_coroutine = asyncio.create_task(user_input_fn(reader, halt_event, unpause_event, synthesizer, modify_index_queue))
+        user_input_coroutine = asyncio.create_task(
+            user_input_fn(reader, halt_event, unpause_event, synthesizer, modify_index_queue))
         while i < len(ssml_strings):
             ssml_string, total_tokens, start_token, end_token = ssml_strings[i]
             if i < start_index:
