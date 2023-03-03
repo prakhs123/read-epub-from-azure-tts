@@ -82,24 +82,25 @@ def create_ssml_string(text, doc_tag, emphasis_level):
     return f"""
         <{doc_tag}>
             <mstts:express-as style="narration-professional">
-                <prosody rate="+20.00%">
+                <prosody rate="+40.00%">
                     <emphasis level="{emphasis_level}">
                         {text}
                     </emphasis>
                 </prosody>
             </mstts:express-as>
-        </{doc_tag}>"""
+        </{doc_tag}>""", len(text.split(' '))
 
 
 def create_ssml_strings(contents, token_number, num_tokens):
     def reset_ssml_string():
-        nonlocal curr_ssml_string, current_token_number_inside_index, token_number
+        nonlocal curr_ssml_string, curr_ssml_string_words, current_token_number_inside_index, token_number
         if curr_ssml_string == header:
             return
         curr_ssml_string += footer
-        ssml_strings.append((curr_ssml_string, current_token_number_inside_index, token_number,
+        ssml_strings.append((curr_ssml_string, curr_ssml_string_words, current_token_number_inside_index, token_number,
                              token_number + current_token_number_inside_index))
         curr_ssml_string = header
+        curr_ssml_string_words = 0
         token_number += current_token_number_inside_index
         current_token_number_inside_index = 0
 
@@ -110,6 +111,7 @@ def create_ssml_strings(contents, token_number, num_tokens):
         </voice>
     </speak>"""
     curr_ssml_string = header
+    curr_ssml_string_words = 0
     current_token_number_inside_index = 0
 
     for content in contents:
@@ -132,15 +134,16 @@ def create_ssml_strings(contents, token_number, num_tokens):
         if text == '':
             reset_ssml_string()
             continue
-        token_string = create_ssml_string(text, doc_tag, emphasis_level)
+        token_string, words = create_ssml_string(text, doc_tag, emphasis_level)
         curr_ssml_string += token_string
+        curr_ssml_string_words += words
         current_token_number_inside_index += 1
         logging.debug(
             f"token_string:\n {token_string}\ntoken_index: {token_number + current_token_number_inside_index}")
 
     if curr_ssml_string:
         curr_ssml_string += footer
-        ssml_strings.append((curr_ssml_string, current_token_number_inside_index, token_number,
+        ssml_strings.append((curr_ssml_string, curr_ssml_string_words, current_token_number_inside_index, token_number,
                              token_number + current_token_number_inside_index))
         current_token_number_inside_index += 1
 
@@ -176,9 +179,10 @@ async def user_input_fn(reader, halt_event=None, unpause_event=None, synthesizer
             halt_event.set()
 
 
-async def speak(synthesizer, ssml_string):
-    def synthesis_completed(event, loop, evt):
+async def speak(synthesizer, ssml_string, words):
+    def synthesis_completed(event, loop, words, evt):
         logging.debug(f"Synthesis Completed")
+        logging.info(f"Words: {words}, Time taken: {evt.result.audio_duration} WPM: {words/((evt.result.audio_duration.seconds)/60)}")
         speech_synthesis_result = evt.result
         if speech_synthesis_result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
             logging.debug("Speech synthesized for text [{}]".format(ssml_string))
@@ -196,11 +200,11 @@ async def speak(synthesizer, ssml_string):
         loop.call_soon_threadsafe(event.set)
 
     completion_event = asyncio.Event()
-    synthesis_completed_partial = functools.partial(synthesis_completed, completion_event, asyncio.get_running_loop())
+    synthesis_completed_partial = functools.partial(synthesis_completed, completion_event, asyncio.get_running_loop(), words)
     synthesis_cancelled_partial = functools.partial(synthesis_cancelled, completion_event, asyncio.get_running_loop())
     synthesizer.synthesis_completed.connect(synthesis_completed_partial)
     synthesizer.synthesis_canceled.connect(synthesis_cancelled_partial)
-    await asyncio.to_thread(synthesizer.start_speaking_ssml_async, ssml_string)
+    x = await asyncio.to_thread(synthesizer.start_speaking_ssml_async, ssml_string)
     await completion_event.wait()
     synthesizer.synthesis_completed.disconnect_all()
 
@@ -242,8 +246,8 @@ async def main():
     else:
         contents = soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p'])
     ssml_strings = create_ssml_strings(contents, 0, num_tokens)
-    for i, (ssml_string, total_tokens, start_token, end_token) in enumerate(ssml_strings):
-        logging.info(f"Index: {i} total_tokens: {total_tokens}, start_token: {start_token}, end_token: {end_token}")
+    for i, (ssml_string, words, total_tokens, start_token, end_token) in enumerate(ssml_strings):
+        logging.info(f"Index: {i}, words: {words} total_tokens: {total_tokens}, start_token: {start_token}, end_token: {end_token}")
     synthesizer = get_speech_synthesizer()
     halt_event = asyncio.Event()
     unpause_event = asyncio.Event()
@@ -256,7 +260,7 @@ async def main():
         user_input_coroutine = asyncio.create_task(
             user_input_fn(reader, halt_event, unpause_event, synthesizer, modify_index_queue))
         while i < len(ssml_strings):
-            ssml_string, total_tokens, start_token, end_token = ssml_strings[i]
+            ssml_string, words, total_tokens, start_token, end_token = ssml_strings[i]
             if i < start_index:
                 logging.info(f"Skipping Index: {i}")
                 i += 1
@@ -271,7 +275,7 @@ async def main():
             logging.info(
                 "Press space to skip the current audio anytime, Press q to stop program, Press b to play previous index, Press r to restart playing, Press p to play/pause")
             # speech synthesis starts here
-            speak_coroutine = asyncio.create_task(speak(synthesizer, ssml_string))
+            speak_coroutine = asyncio.create_task(speak(synthesizer, ssml_string, words))
             await speak_coroutine
             logging.info(f'Index {i} completed')
             try:
