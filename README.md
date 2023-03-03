@@ -29,13 +29,17 @@ Remove ads and side contents from HTML pages
 python read-epub.py --epub-or-html-file EPUB_FILE_PATH --item-page ITEM_PAGE
 ```
 ## Arguments:
-* epub-or-html-file: Optional. Path to the EPUB/HTML file to convert to speech.
-The page of the epub file to read can be configured by item-page argument. Note, each epub files is divided into multiple pages, which includes Preface, Acknowledgements, Front Cover etc. So, If you want to read from Chapter 1 of the epub file, you need to find the appropriate page by trial and error.
-* item-page: Optional. Index of the page in the epub file to convert to speech. (not required in case of webpage/HTML)
-How the HTML is broken into SSML strings can be configured by num-tokens argument
-* num-tokens: Optional. The number of tokens each SSML string should contain. Default 1.
-The place from where the speech should start can be configured by start-index argument
-* start-index: Optional. the index of the SSML string from which the speech should start.
+* epub-or-html-file: Optional. Path to the EPUB/HTML file to convert to speech.  
+
+The page of the epub file to read can be configured by item-page argument. Note, each epub files is divided into multiple pages, which includes Preface, Acknowledgements, Front Cover etc. So, If you want to read from Chapter 1 of the epub file, you need to find the appropriate page by trial and error.    
+
+* item-page: Optional. Index of the page in the epub file to convert to speech. (not required in case of webpage/HTML)  
+
+How the HTML is broken into SSML strings can be configured by num-tokens argument  
+* num-tokens: Optional. The number of tokens each SSML string should contain. Default 1.  
+
+The place from where the speech should start can be configured by start-index argument    
+* start-index: Optional. the index of the SSML string from which the speech should start.  
 
 Tokens are the smallest unit, and a single SSML string can contain one or more tokens. By properly utilizing num-token and start-index, the project can accurately generate speech output from the HTML page's multiple SSML string and their contained tokens.
 
