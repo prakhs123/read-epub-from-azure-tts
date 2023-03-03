@@ -224,6 +224,7 @@ async def main():
             session = HTMLSession()
             r = session.get(args.epub_or_html_file)
             html = r.text
+            session.close()
         elif args.epub_or_html_file.endswith('.html'):
             with open(args.epub_or_html_file, 'r') as file:
                 html = file.read()
@@ -262,7 +263,7 @@ async def main():
                 continue
             if halt_event.is_set():
                 break
-            logging.debug(f"ssml_string:\n{ssml_string}\nTotal tokens in ssml_string: {total_tokens - 1}")
+            logging.debug(f"ssml_string:\n{ssml_string}\nTotal tokens in ssml_string: {total_tokens}")
             logging.info(f"Current Index: {i}")
             logging.info(f"Reading from start_token: {start_token}, end_token {end_token}")
             text = extract_emphasis_text(ssml_string)
