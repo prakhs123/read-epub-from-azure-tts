@@ -298,11 +298,11 @@ async def main():
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Text to speech converter')
+    parser.add_argument('epub_or_html_file', type=str, metavar='EPUB_OR_HTML_FILE',
+                        help='path to the EPUB/HTML file to convert to speech')
     parser.add_argument('--get-available-voices', type=str, default=None,
                         help="Enter a locale in BCP-47 format (e.g. en-US) that you want to get the voices of, "
                              "or enter empty to get voices in all locales.")
-    parser.add_argument('--epub-or-html-file', type=str, required=False,
-                        help='path to the EPUB/HTML file to convert to speech')
     parser.add_argument('--num-tokens', type=int, default=1,
                         help='number of tokens in one ssml string, default 1')
     parser.add_argument('--item-page', type=int, default=0,

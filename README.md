@@ -26,7 +26,7 @@ Remove ads and side contents from HTML pages
 
 ## Usage
 ```
-python read-epub.py --epub-or-html-file EPUB_FILE_PATH --item-page ITEM_PAGE
+python read-epub.py EPUB_OR_HTML_FILE --item-page ITEM_PAGE
 ```
 ## Arguments:
 * epub-or-html-file: Optional. Path to the EPUB/HTML file to convert to speech.  
@@ -66,11 +66,11 @@ pip install -r requirements.txt
 ```
 ### Reading epub file
 ```
-python3 read-epub.py --epub-or-html-file Alices\ Adventures\ in\ Wonderland.epub --item-page 0 --start-index 0
+python3 read-epub.py Alices\ Adventures\ in\ Wonderland.epub --item-page 0 --start-index 0
 ```
 ### Reading Web page
 ```
-python3 read-epub.py --epub-or-html-file "https://www.artofliving.org/in-en/meditation/meditation-for-you/meditation-and-insomnia"
+python3 read-epub.py "https://www.artofliving.org/in-en/meditation/meditation-for-you/meditation-and-insomnia"
 ```
 ## Acknowledgements
 This script uses Azure's Text-to-Speech service for converting text into speech.
